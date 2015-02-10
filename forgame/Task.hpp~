@@ -1,0 +1,147 @@
+#include "NamedObject.hpp"
+
+namespace ts {
+namespace namedobj {
+
+
+enum class TaskStatus {
+  RemoveTask,
+	ContinueTask,
+};
+
+	
+struct Task : NamedObject<Task> {
+  using Super = NamedObject<Task>;
+  using TaskHolder = ts::namedobj::Holder<Task>;
+  using RawArgs = vector<Task>;
+  struct TaskArgs : vector<Task> {
+	using TaskFunc = function<TaskStatus(TaskArgs&)>;
+	
+	TaskArgs() = default;
+	TaskArgs(Task&& t) {  emplace_back(move(t));}
+	TaskArgs(Task&& t, Task&&t2) {  emplace_back(move(t)); emplace_back(move(t2));}
+	TaskArgs(TaskFunc&& t, TaskFunc&& t2) { emplace_back(move(t)); emplace_back(move(t2));}
+  };
+
+  using TaskFunc = TaskArgs::TaskFunc;
+  TaskFunc func_;
+  TaskArgs args_;
+  Task() noexcept {}
+  Task(const Task& t) = delete;
+
+  Task(TaskFunc f)                   noexcept : Super(), func_(f) { setup(); }
+  Task(TaskFunc f, Task&& t)         noexcept : Super(), func_(f), args_(move(t)) { setup();  }
+  Task(TaskFunc f, TaskArgs&& tasks) noexcept : Super(), func_(f), args_(move(tasks)) {	setup(); }
+
+  Task(const string& n)                               noexcept : Super(n, true) {}
+  Task(const string& n, TaskFunc f)                   noexcept : Super(n), func_(f) { setup(); }
+  Task(const string& n, TaskFunc f, Task&& t)         noexcept : Super(n), func_(f), args_(move(t)) { setup();  }
+  Task(const string& n, TaskFunc f, TaskArgs&& tasks) noexcept : Super(n), func_(f), args_(move(tasks))  {	setup();  }
+  
+  Task(Task&& t) noexcept
+  :  Super(move(static_cast<Super&&>(t)))
+	, func_(move(t.func_))
+	, args_(move(t.args_))
+  {
+	valid("constructor &&");
+  }
+
+  ~Task() noexcept {
+	cerr << "Task:" << name() << " destructed" << endl;
+	if (!nameReference_ && !name().empty()) {
+	  if (name().length() > 5 && name().substr(name().length()-5) != "moved") {
+		cerr << "!!! body destructed" << endl;
+	  }
+	}
+  }
+
+
+  bool empty() const {
+	if (nameReference_) return false;
+	if (func_) return false;
+	return true;
+  }
+
+  Task makeReference() const {
+	setUniqName();
+	valid("makeRef");
+	cerr << name() << " is ok" << endl;
+	return Task(name_);
+  }
+
+  
+  void setup() {
+	cerr << "setup" << endl;
+	if (!name_.empty()) {
+	  args_.emplace_back(Task(name_));
+	}
+	cerr << "Task::setup: name:" << name_ << " : " << this << endl;
+  }
+  void setup(RawArgs&& args) {
+	for (auto&& a : args) {
+	  args_.emplace_back(move(a));
+	}
+	setup();
+  }
+
+
+  Task clone(const char* msg = "") const {
+	cerr << "Task clone:'" << msg << "'" << name_ << endl;
+	return makeReference();
+  }
+  bool valid(const char* msg = "") const {
+	if (nameReference_ && !name_.empty()) {
+	  string msg2(msg);
+	  msg2 += "+ref";
+	  auto found = getBody();
+	  if (found) found->valid(msg2.c_str());
+	  else {
+		//cerr << msg2 << " not found" << endl;
+	  }
+	  return true;
+	}
+	if (func_ && !args_.empty()) return true;
+	if (!func_ && args_.empty()) return true;
+	cerr << "valid(" << msg << ") ";
+	if (func_) cerr << "<has func>"; else cerr << "<no func>";
+	if (args_.empty()) cerr << "<empty args>";
+	cerr << "<name:" << name_ << ">";
+	cerr << "<nameref:" << nameReference_ << ">";
+	cerr << "<" << this << ">";
+	cerr << " invalid: " << name_ <<  endl;
+	assert(!"invalid Task instance");
+	return false;
+  }
+
+  void operator = (const Task& t) = delete; 
+
+  void operator = (Task&& t) {
+	Super::operator = (move(static_cast<Super&&>(t)));
+	func_ = move(t.func_);
+	args_ = move(t.args_);
+	valid("operator = ");
+  }
+  TaskStatus go(){
+	assert(func_);
+	valid("go");
+	assert(!args_.empty());
+	return func_(args_);
+  }
+
+  bool hasFunction() const { return !nameReference_; }
+  const string& name() const { return name_; }
+  
+  // 最後のタスクリストは呼び出したタスク
+  Task& returnTask() {
+	valid("return Task");
+	return args_.at(args_.size()-1);
+  }
+  static Task& returnTask(TaskArgs& ta) {
+	assert(!ta.empty());
+	return ta.at(ta.size()-1);
+  }
+};
+
+
+
+}} // ts::namedobj
